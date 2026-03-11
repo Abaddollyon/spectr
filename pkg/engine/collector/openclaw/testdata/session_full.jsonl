@@ -1,0 +1,13 @@
+{"type":"session","version":3,"id":"test-session-001","timestamp":"2026-01-01T10:00:00.000Z","cwd":"/home/user/workspace"}
+{"type":"model_change","id":"m001","parentId":null,"timestamp":"2026-01-01T10:00:00.001Z","provider":"anthropic","modelId":"claude-sonnet-4-6"}
+{"type":"thinking_level_change","id":"m002","parentId":"m001","timestamp":"2026-01-01T10:00:00.002Z","thinkingLevel":"high"}
+{"type":"custom","customType":"model-snapshot","data":{"provider":"anthropic","modelId":"claude-sonnet-4-6"},"id":"m003","parentId":"m002","timestamp":"2026-01-01T10:00:00.003Z"}
+{"type":"message","id":"e001","parentId":"m003","timestamp":"2026-01-01T10:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Run echo hello for me"}],"timestamp":1735722001000}}
+{"type":"message","id":"e002","parentId":"e001","timestamp":"2026-01-01T10:00:02.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"I will run echo hello"},{"type":"text","text":"I'll run that command for you."},{"type":"toolCall","id":"toolu_abc123","name":"exec","arguments":{"command":"echo hello"}}]}}
+{"type":"message","id":"e003","parentId":"e002","timestamp":"2026-01-01T10:00:03.000Z","message":{"role":"toolResult","toolCallId":"toolu_abc123","toolName":"exec","content":[{"type":"text","text":"hello"}],"isError":false,"timestamp":1735722003000}}
+{"type":"message","id":"e004","parentId":"e003","timestamp":"2026-01-01T10:00:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"The command output was: hello"}]}}
+{"type":"message","id":"e005","parentId":"e004","timestamp":"2026-01-01T10:00:05.000Z","message":{"role":"user","content":[{"type":"text","text":"Now read a file"}],"timestamp":1735722005000}}
+{"type":"message","id":"e006","parentId":"e005","timestamp":"2026-01-01T10:00:06.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"toolu_def456","name":"read","arguments":{"path":"/tmp/test.txt"}},{"type":"toolCall","id":"toolu_ghi789","name":"web_search","arguments":{"query":"go fsnotify"}}]}}
+{"type":"message","id":"e007","parentId":"e006","timestamp":"2026-01-01T10:00:07.000Z","message":{"role":"toolResult","toolCallId":"toolu_def456","toolName":"read","content":[{"type":"text","text":"file contents here"}],"isError":false,"timestamp":1735722007000}}
+{"type":"message","id":"e008","parentId":"e006","timestamp":"2026-01-01T10:00:08.000Z","message":{"role":"toolResult","toolCallId":"toolu_ghi789","toolName":"web_search","content":[{"type":"text","text":"error connecting"}],"isError":true,"timestamp":1735722008000}}
+{"type":"message","id":"e009","parentId":"e008","timestamp":"2026-01-01T10:00:09.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}
