@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en" x-cloak>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spectr</title>
+  <link rel="stylesheet" href="/static/style.css" />
+
+  <!-- Chart.js — must be synchronous so Alpine init can reference it -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+  <!-- Alpine.js — defer, loaded after Chart.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+
+  <!-- HTMX -->
+  <script defer src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+</head>
+
+<body x-data="spectrApp()" x-init="init()">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="header-brand">
+        <span class="logo">⬡ SPECTR</span>
+        <span class="version" x-text="version">v0.1.0</span>
+      </div>
+      <div class="header-meta">
+        <div class="health-indicator">
+          <span class="health-dot" :class="healthClass"></span>
+          <span class="health-label" x-text="healthLabel">Checking</span>
+        </div>
+        <span class="timestamp" x-text="clock"></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Tab Nav ────────────────────────────────────────────────────────── -->
+  <nav class="tab-nav">
+    <button class="tab-btn" :class="{ active: tab === 'overview' }" @click="tab = 'overview'">
+      Overview
+    </button>
+    <button class="tab-btn" :class="{ active: tab === 'runs' }" @click="switchTab('runs')">
+      Runs
+      <span class="tab-badge badge-running" x-show="runningCount > 0" x-text="runningCount"></span>
+    </button>
+    <button class="tab-btn" :class="{ active: tab === 'alerts' }" @click="switchTab('alerts')">
+      Alerts
+      <span class="tab-badge crit" x-show="alertCount > 0" x-text="alertCount"></span>
+    </button>
+  </nav>
+
+  <!-- ── Main ───────────────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- ════ OVERVIEW ════════════════════════════════════════════════════ -->
+    <section x-show="tab === 'overview'">
+
+      <!--
+        Summary cards — HTMX polls /api/v1/summary every 10 s.
+        The server returns an HTML fragment of four .summary-card divs.
+        Until the first response arrives, skeleton placeholders are shown.
+      -->
+      <div
+        id="summary-cards"
+        class="summary-grid"
+        hx-get="/api/v1/summary"
+        hx-trigger="load, every 10s"
+        hx-swap="innerHTML"
+        hx-indicator="#summary-spinner"
+      >
+        <!-- skeleton placeholders (replaced on first HTMX swap) -->
+        <div class="summary-card skeleton"><div class="skeleton-text" style="width:40%;margin-bottom:.5rem"></div><div class="skeleton-text" style="width:65%"></div></div>
+        <div class="summary-card skeleton"><div class="skeleton-text" style="width:40%;margin-bottom:.5rem"></div><div class="skeleton-text" style="width:65%"></div></div>
+        <div class="summary-card skeleton"><div class="skeleton-text" style="width:40%;margin-bottom:.5rem"></div><div class="skeleton-text" style="width:65%"></div></div>
+        <div class="summary-card skeleton"><div class="skeleton-text" style="width:40%;margin-bottom:.5rem"></div><div class="skeleton-text" style="width:65%"></div></div>
+      </div>
+      <div id="summary-spinner" class="htmx-indicator" style="margin-bottom:.5rem;color:var(--text-dim);font-size:.7rem;font-family:var(--font-mono)">
+        <span class="spinner"></span>
+      </div>
+
+      <!-- Charts row -->
+      <div class="charts-grid">
+        <div class="card chart-card">
+          <div class="card-header">
+            <h3 class="card-title">Token Usage</h3>
+            <span class="card-meta">Last 7 days · daily</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="token-chart"></canvas>
+          </div>
+        </div>
+        <div class="card chart-card">
+          <div class="card-header">
+            <h3 class="card-title">Cost (USD)</h3>
+            <span class="card-meta">Last 7 days · daily</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="cost-chart"></canvas>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ════ RUNS ════════════════════════════════════════════════════════ -->
+    <section x-show="tab === 'runs'">
+
+      <!-- Filter bar — Alpine controls values; HTMX includes them as query params -->
+      <form
+        id="runs-filter"
+        class="filter-bar"
+        hx-get="/api/v1/runs"
+        hx-target="#runs-body"
+        hx-trigger="change, submit"
+        hx-swap="innerHTML"
+        hx-push-url="false"
+        @submit.prevent
+      >
+        <select class="filter-select" name="framework" x-model="runsFilter.framework">
+          <option value="">All Frameworks</option>
+          <option value="openclaw">openclaw</option>
+          <option value="claudecode">claudecode</option>
+          <option value="codexcli">codexcli</option>
+        </select>
+
+        <select class="filter-select" name="status" x-model="runsFilter.status">
+          <option value="">All Status</option>
+          <option value="running">running</option>
+          <option value="completed">completed</option>
+          <option value="failed">failed</option>
+          <option value="timeout">timeout</option>
+        </select>
+
+        <input type="hidden" name="limit" value="100" />
+
+        <button type="submit" class="filter-btn" aria-label="Refresh runs">
+          ↻ Refresh
+        </button>
+
+        <!-- live spinner next to refresh -->
+        <span id="runs-spinner" class="htmx-indicator spinner"></span>
+      </form>
+
+      <div class="card table-card">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Framework</th>
+              <th>Agent</th>
+              <th>Status</th>
+              <th>Tokens In</th>
+              <th>Tokens Out</th>
+              <th>Cost</th>
+              <th>Duration</th>
+              <th>Started</th>
+            </tr>
+          </thead>
+          <!--
+            tbody is the HTMX swap target.
+            Server returns <tr> rows matching the schema above.
+            Example row template the server should emit:
+
+            <tr>
+              <td><span class="fw-pill">openclaw</span></td>
+              <td class="mono">kimi</td>
+              <td><span class="badge badge-ok"><span class="badge-dot"></span>completed</span></td>
+              <td class="mono">12,543</td>
+              <td class="mono">4,210</td>
+              <td class="mono">$0.0042</td>
+              <td class="mono">1m 23s</td>
+              <td class="dim">2026-03-11 18:00</td>
+            </tr>
+          -->
+          <tbody
+            id="runs-body"
+            hx-get="/api/v1/runs?limit=100"
+            hx-trigger="load"
+            hx-swap="innerHTML"
+            hx-indicator="#runs-spinner"
+          >
+            <tr>
+              <td colspan="8">
+                <div class="skeleton-text" style="margin:.5rem 0"></div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </section>
+
+    <!-- ════ ALERTS ══════════════════════════════════════════════════════ -->
+    <section x-show="tab === 'alerts'">
+
+      <!-- Alert filters -->
+      <form
+        id="alerts-filter"
+        class="filter-bar"
+        hx-get="/api/v1/alerts"
+        hx-target="#alerts-list"
+        hx-trigger="change, submit"
+        hx-swap="innerHTML"
+        hx-push-url="false"
+        @submit.prevent
+      >
+        <select class="filter-select" name="severity" x-model="alertsFilter.severity">
+          <option value="">All Severity</option>
+          <option value="warning">Warning</option>
+          <option value="critical">Critical</option>
+        </select>
+
+        <select class="filter-select" name="acked" x-model="alertsFilter.acked">
+          <option value="false">Unacknowledged</option>
+          <option value="">All</option>
+          <option value="true">Acknowledged</option>
+        </select>
+
+        <input type="hidden" name="acked" x-bind:value="alertsFilter.acked" />
+
+        <button type="submit" class="filter-btn" aria-label="Refresh alerts">
+          ↻ Refresh
+        </button>
+
+        <span id="alerts-spinner" class="htmx-indicator spinner"></span>
+      </form>
+
+      <!--
+        Alerts list — HTMX loads + refreshes on filter change.
+        Server returns .alert-card divs. Each card includes an ack button:
+
+        <div class="alert-card crit" id="alert-{id}">
+          <div class="alert-body">
+            <div class="alert-meta">
+              <span class="badge badge-crit">critical</span>
+              <span class="alert-type">cost_spike</span>
+            </div>
+            <div class="alert-message">Cost spike detected: $4.20 vs baseline $0.80</div>
+            <div class="alert-detail">z-score: 3.7 · metric: total_cost_usd · run: abc123</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.35rem">
+            <span class="alert-time">18:05 CET</span>
+            <button class="btn btn-ack"
+              hx-post="/api/v1/alerts/{id}/ack"
+              hx-target="#alerts-list"
+              hx-swap="innerHTML"
+              hx-include="#alerts-filter">
+              Ack
+            </button>
+          </div>
+        </div>
+      -->
+      <div
+        id="alerts-list"
+        class="alerts-list"
+        hx-get="/api/v1/alerts?acked=false"
+        hx-trigger="load"
+        hx-swap="innerHTML"
+        hx-indicator="#alerts-spinner"
+      >
+        <div class="alert-card skeleton">
+          <div class="alert-body">
+            <div class="skeleton-text" style="width:30%;margin-bottom:.4rem"></div>
+            <div class="skeleton-text" style="width:80%;margin-bottom:.3rem"></div>
+            <div class="skeleton-text" style="width:55%"></div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ── Alpine + Chart.js logic ──────────────────────────────────────── -->
+  <script>
+  // Chart.js global defaults for dark theme
+  Chart.defaults.color           = '#6e6e8f';
+  Chart.defaults.borderColor     = '#1e1e2e';
+  Chart.defaults.font.family     = "ui-monospace, monospace";
+  Chart.defaults.font.size       = 11;
+
+  const CHART_OPTS_BASE = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#18181f',
+        borderColor: '#1e1e2e',
+        borderWidth: 1,
+        titleColor: '#e2e2f0',
+        bodyColor: '#6e6e8f',
+        padding: 10,
+        cornerRadius: 4,
+      },
+    },
+    scales: {
+      x: {
+        grid:   { color: '#1e1e2e', drawTicks: false },
+        border: { color: '#1e1e2e' },
+        ticks:  { color: '#6e6e8f', maxTicksLimit: 7 },
+      },
+      y: {
+        grid:         { color: '#1e1e2e', drawTicks: false },
+        border:       { color: '#1e1e2e', dash: [4, 4] },
+        ticks:        { color: '#6e6e8f' },
+        beginAtZero:  true,
+      },
+    },
+  };
+
+  // Helper: format date as "Mar 11"
+  function fmtDate(iso) {
+    return new Date(iso).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
+  }
+
+  // Helper: last 7 days UTC buckets (fallback demo data when API unreachable)
+  function mockBuckets(maxVal = 50000) {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      d.setHours(0, 0, 0, 0);
+      return { timestamp: d.toISOString(), value: Math.random() * maxVal };
+    });
+  }
+
+  function spectrApp() {
+    return {
+      /* ── state ── */
+      tab: 'overview',
+      version: 'v0.1.0',
+      clock: '',
+      healthClass: '',
+      healthLabel: 'Checking',
+      runningCount: 0,
+      alertCount: 0,
+      runsFilter: { framework: '', status: '' },
+      alertsFilter: { severity: '', acked: 'false' },
+      _tokenChart: null,
+      _costChart: null,
+      _chartsLoaded: false,
+
+      /* ── lifecycle ── */
+      init() {
+        this._tickClock();
+        setInterval(() => this._tickClock(), 1000);
+
+        this._checkHealth();
+        setInterval(() => this._checkHealth(), 30_000);
+
+        // Load server version (optional endpoint)
+        fetch('/api/v1/version')
+          .then(r => r.json())
+          .then(d => { if (d?.version) this.version = d.version; })
+          .catch(() => {});
+
+        // Charts load when Alpine is ready
+        this.$nextTick(() => this._loadCharts());
+
+        // Update badge counts from HTMX swap responses
+        document.addEventListener('htmx:afterSwap', (e) => {
+          if (e.detail.target.id === 'summary-cards') {
+            this._syncBadges(e.detail.target);
+          }
+          if (e.detail.target.id === 'alerts-list') {
+            this.alertCount = e.detail.target.querySelectorAll('.alert-card:not(.acked)').length;
+          }
+          if (e.detail.target.id === 'runs-body') {
+            this.runningCount = e.detail.target.querySelectorAll('[data-status="running"]').length;
+          }
+        });
+      },
+
+      /* ── tab switch (ensures HTMX lazy sections load) ── */
+      switchTab(name) {
+        this.tab = name;
+        // Charts only render when overview is visible; reload if switching back
+        if (name === 'overview' && !this._chartsLoaded) {
+          this.$nextTick(() => this._loadCharts());
+        }
+      },
+
+      /* ── clock ── */
+      _tickClock() {
+        this.clock = new Date().toLocaleTimeString('en-GB', {
+          timeZone: 'Europe/Amsterdam',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+          hour12: false,
+        }) + ' CET';
+      },
+
+      /* ── health check ── */
+      async _checkHealth() {
+        try {
+          const r = await fetch('/api/v1/health', { signal: AbortSignal.timeout(4000) });
+          if (r.ok) {
+            const d = await r.json().catch(() => ({}));
+            const ok = !d.status || d.status === 'ok';
+            this.healthClass = ok ? 'ok' : 'warn';
+            this.healthLabel = ok ? 'Healthy' : 'Degraded';
+          } else {
+            this.healthClass = 'warn';
+            this.healthLabel = 'Degraded';
+          }
+        } catch {
+          this.healthClass = 'crit';
+          this.healthLabel = 'Down';
+        }
+      },
+
+      /* ── badge sync from summary HTML ── */
+      _syncBadges(root) {
+        const alertEl   = root.querySelector('[data-metric="alerts_count"]');
+        const runningEl = root.querySelector('[data-metric="active_agents"]');
+        if (alertEl)   this.alertCount   = parseInt(alertEl.dataset.value ?? '0', 10);
+        if (runningEl) this.runningCount  = parseInt(runningEl.dataset.value ?? '0', 10);
+      },
+
+      /* ── charts ── */
+      async _loadCharts() {
+        const to   = new Date();
+        const from = new Date(to - 7 * 86_400_000);
+        const qs   = new URLSearchParams({
+          from: from.toISOString(), to: to.toISOString(), interval: 'day',
+        });
+
+        const [tokenData, costData] = await Promise.all([
+          fetch(`/api/v1/metrics/tokens?${qs}`)
+            .then(r => r.json()).catch(() => mockBuckets(80000)),
+          fetch(`/api/v1/metrics/cost?${qs}`)
+            .then(r => r.json()).catch(() => mockBuckets(3)),
+        ]);
+
+        this._renderTokenChart(tokenData);
+        this._renderCostChart(costData);
+        this._chartsLoaded = true;
+      },
+
+      _renderTokenChart(data) {
+        const ctx = document.getElementById('token-chart');
+        if (!ctx) return;
+        if (this._tokenChart) { this._tokenChart.destroy(); this._tokenChart = null; }
+
+        const labels = data.map(d => fmtDate(d.timestamp));
+        const values = data.map(d => Math.round(d.value));
+
+        this._tokenChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Tokens',
+              data: values,
+              borderColor:     '#7c3aed',
+              backgroundColor: 'rgba(124,58,237,0.08)',
+              borderWidth: 2,
+              fill: true,
+              tension: 0.35,
+              pointRadius: 3,
+              pointHoverRadius: 5,
+              pointBackgroundColor: '#7c3aed',
+              pointBorderColor:     '#09090f',
+              pointBorderWidth: 2,
+            }],
+          },
+          options: {
+            ...CHART_OPTS_BASE,
+            plugins: {
+              ...CHART_OPTS_BASE.plugins,
+              tooltip: {
+                ...CHART_OPTS_BASE.plugins.tooltip,
+                callbacks: {
+                  label: ctx => ` ${ctx.parsed.y.toLocaleString()} tokens`,
+                },
+              },
+            },
+            scales: {
+              ...CHART_OPTS_BASE.scales,
+              y: {
+                ...CHART_OPTS_BASE.scales.y,
+                ticks: {
+                  ...CHART_OPTS_BASE.scales.y.ticks,
+                  callback: v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v,
+                },
+              },
+            },
+          },
+        });
+      },
+
+      _renderCostChart(data) {
+        const ctx = document.getElementById('cost-chart');
+        if (!ctx) return;
+        if (this._costChart) { this._costChart.destroy(); this._costChart = null; }
+
+        const labels = data.map(d => fmtDate(d.timestamp));
+        const values = data.map(d => +d.value.toFixed(4));
+
+        this._costChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Cost USD',
+              data: values,
+              backgroundColor: 'rgba(59,130,246,0.55)',
+              borderColor:      '#3b82f6',
+              borderWidth: 1,
+              borderRadius: 3,
+              borderSkipped: false,
+            }],
+          },
+          options: {
+            ...CHART_OPTS_BASE,
+            plugins: {
+              ...CHART_OPTS_BASE.plugins,
+              tooltip: {
+                ...CHART_OPTS_BASE.plugins.tooltip,
+                callbacks: {
+                  label: ctx => ` $${ctx.parsed.y.toFixed(4)}`,
+                },
+              },
+            },
+          },
+        });
+      },
+    };
+  }
+
+  /* ── HTMX global config ── */
+  document.addEventListener('htmx:configRequest', e => {
+    e.detail.headers['X-Spectr-Dashboard'] = '1';
+  });
+
+  /* ── HTMX error handling — show inline error state ── */
+  document.addEventListener('htmx:responseError', e => {
+    const t = e.detail.target;
+    if (!t) return;
+    t.innerHTML = `<div class="empty-state">
+      <div class="empty-state-icon">⚠</div>
+      <div>Failed to load data (${e.detail.xhr.status})</div>
+    </div>`;
+  });
+
+  document.addEventListener('htmx:sendError', e => {
+    const t = e.detail.target;
+    if (!t) return;
+    t.innerHTML = `<div class="empty-state">
+      <div class="empty-state-icon">⬡</div>
+      <div>Spectr API unreachable</div>
+    </div>`;
+  });
+  </script>
+
+</body>
+</html>
