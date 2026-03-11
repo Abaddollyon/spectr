@@ -18,10 +18,11 @@ const DefaultPort = 9099
 
 // Server is the Spectr REST + WebSocket API server.
 type Server struct {
-	store  engine.Store
-	port   int
-	hub    *Hub
-	router chi.Router
+	store     engine.Store
+	port      int
+	hub       *Hub
+	router    chi.Router
+	dashFS    http.FileSystem
 }
 
 // NewServer creates a new Server with the given store and port.
@@ -37,6 +38,12 @@ func NewServer(store engine.Store, port int) *Server {
 	}
 	s.router = s.buildRouter()
 	return s
+}
+
+// WithDashboard sets the embedded dashboard filesystem.
+func (s *Server) WithDashboard(fs http.FileSystem) {
+	s.dashFS = fs
+	s.router = s.buildRouter()
 }
 
 // Hub returns the WebSocket broadcast hub so other components can push events.
@@ -84,9 +91,10 @@ func (s *Server) buildRouter() chi.Router {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
-	r.Use(jsonContentType)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(jsonContentType)
+
 		r.Get("/health", s.handleHealth)
 
 		r.Get("/runs", s.handleListRuns)
@@ -103,6 +111,12 @@ func (s *Server) buildRouter() chi.Router {
 	})
 
 	r.Get("/ws/stream", s.handleWebSocket)
+
+	// Dashboard static files (if configured)
+	if s.dashFS != nil {
+		fileServer := http.FileServer(s.dashFS)
+		r.Handle("/*", fileServer)
+	}
 
 	return r
 }

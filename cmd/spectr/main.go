@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/Abaddollyon/spectr/dashboard"
 	"github.com/Abaddollyon/spectr/pkg/engine/api"
 	"github.com/Abaddollyon/spectr/pkg/engine/collector/openclaw"
 	"github.com/Abaddollyon/spectr/pkg/engine/store/sqlite"
@@ -57,8 +58,15 @@ func main() {
 		}
 	}()
 
-	// Start API server (blocks until ctx cancelled)
+	// Start API server with dashboard
 	srv := api.NewServer(store, port)
+	dashFS, err := dashboard.StaticFS()
+	if err != nil {
+		log.Printf("dashboard: warning: %v", err)
+	} else {
+		srv.WithDashboard(dashFS)
+		log.Println("dashboard: mounted at /")
+	}
 	log.Printf("api: listening on :%d", port)
 
 	go func() {
